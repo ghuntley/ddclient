@@ -563,6 +563,16 @@ my %services = (
 			  $variables{'service-common-defaults'},
 		        ),
     },
+    'tunnelbroker' => {
+       'updateable'    => undef,
+   'update'    => \&nic_tunnelbroker_update,
+   'examples'  => \&nic_tunnelbroker_examples,
+   'variables' => merge(
+             { 'server'       => setv(T_FQDNP, 1, 0, 1, 'ipv4.tunnelbroker.net', undef) },
+             { 'min-interval' => setv(T_DELAY, 0, 0, 1, 0, interval('10s')),},
+             $variables{'service-common-defaults'},
+           ),
+    },
 );
 $variables{'merged'} = merge($variables{'global-defaults'},
 			     $variables{'service-common-defaults'},
@@ -3668,6 +3678,96 @@ sub nic_dtdns_update {
                 $config{$h}{'status'} = 'failed';
                 failed("updating %s: Server said: '$returned'", $h);
          }
+    }
+}
+
+###################################################################### 
+
+###################################################################### 
+## nic_freedns_examples 
+###################################################################### 
+sub nic_tunnelbroker_examples {
+return <<EoEXAMPLE;
+
+o 'tunnelbroker'
+
+Hurricane Electric IPv6 tunnel endpoint update
+
+Configuration variables applicable to the 'tunnelbroker:
+  protocol=tunnelbroker
+  login=username,
+  password=password,
+  tunnel_id_to_update
+
+Example ${program}.conf file entries:
+  ## single host update
+  protocol=tunnelbroker,                                        \\
+  login=username,                                               \\
+  password=password                                    \\
+  12345
+
+EoEXAMPLE
+} 
+
+######################################################################
+## nic_tunnelbroker_update
+##
+## written by Mike W. Smith
+## revised by Geoffrey Huntley
+##
+## visit https://ipv4.tunnelbroker.net/ipv4_end.php for API specifications
+## needs this url to update:
+## https://USERNAME:PASSWORD@ipv4.tunnelbroker.net/ipv4_end.php?tid=TUNNELID&ip=IPV4ADDR
+##
+######################################################################
+sub nic_tunnelbroker_update {
+
+
+    debug("\nnic_tunnelbroker_update -------------------");
+
+    ## update each configured host
+    foreach my $h (@_) {
+   my $ip = delete $config{$h}{'wantip'};
+        info("setting IP address to %s for %s", $ip, $h);
+        verbose("UPDATE:","updating %s", $h);
+
+   if (not $ip)
+   {
+       $ip = 'AUTO';
+   }
+
+        my $url;
+        $url  .= "https://ipv4.tunnelbroker.net/ipv4_end.php";
+   $url  .= "?tid=$h";
+        $url  .= "&ip=$ip";
+
+   my $reply = geturl(opt('proxy'), $url, $config{$h}{'login'}, $config{$h}{'password'});
+        if (!defined($reply) || !$reply) {
+            failed("updating %s: Could not connect to %s.", $h, $config{$h}{'server'});
+            last;
+        }
+        last if !header_ok($h, $reply);
+
+        my @reply = split /\n/, $reply;
+        if (grep /\+OK/i, @reply) {
+            $config{$h}{'ip'}     = $ip;
+            $config{$h}{'mtime'}  = $now;
+            $config{$h}{'status'} = 'good';
+            success("updating %s: good: IP address set to %s", $h, $ip);
+   }
+   # tunnelbroker will throw an error, regardless of when the last 
+   # update took place if the ip-address has not changed.
+   elsif (grep /already associated with this IP address/i, @reply) {
+            $config{$h}{'ip'}     = $ip;
+            $config{$h}{'mtime'}  = $now;
+            $config{$h}{'status'} = 'good';
+       success("update not necessary %s: good: IP address already set to %s", $h, $ip); 
+        } else {
+            $config{$h}{'status'} = 'failed';
+            warning("SENT:    %s", $url) unless opt('verbose');
+            warning("REPLIED: %s", $reply);
+            failed("updating %s: Invalid reply.", $h);
+        }
     }
 }
 
